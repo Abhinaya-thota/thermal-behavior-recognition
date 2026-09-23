@@ -1,0 +1,24 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Data & model artifacts — too large for GitHub, regenerate locally
+data/
+models/
+outputs/
+runs/
+*.h5
+*.pt
+*.npy
+*.mp4
+*.avi
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
