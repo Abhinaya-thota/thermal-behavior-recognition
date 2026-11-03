@@ -14,10 +14,11 @@ The project has two parallel tracks: **behavior classification** (CNN-LSTM, trai
 
 | Script | Purpose |
 |---|---|
+| `02_split_ucf101.py` | Builds `data/raw_videos/{train,val,test}` from UCF101 **by group** (`gXX`), so clips of the same actor/scene never land in both train and test. `--audit` checks an existing split for this leakage |
 | `03_make_thermal_frames.py` | Converts RGB video (UCF101) into thermal-like frames: grayscale → CLAHE contrast enhancement → Gaussian blur → normalization, with a quality filter to skip blank/corrupt frames |
-| `04_build_sequences.py` | Groups frames into 16-frame sequences per video for spatiotemporal learning |
+| `04_build_sequences.py` | Groups frames into 16-frame sequences per video, streaming them into a memory-mapped `uint8` `X.npy` (peak RAM ≈ one video; 4× smaller on disk than float32). Also saves `video_idx.npy` so evaluation can score per video |
 | `05_train_cnn_lstm.py` | Trains the CNN-LSTM classifier (TimeDistributed CNN blocks + LSTM + dense head) using a memory-mapped data loader to handle large sequence arrays without loading everything into RAM |
-| `06_evaluate_test.py` | Evaluates the trained model on the held-out test set; outputs a classification report and confusion matrix |
+| `06_evaluate_test.py` | Evaluates the trained model on the held-out test set: per-sequence and per-video accuracy, classification report and confusion matrix |
 | `07_live_prediction.py` | Runs real-time behavior prediction from a webcam feed, with majority-vote smoothing to reduce flicker |
 | `08_video_behavior_demo.py` | Runs behavior prediction on a pre-recorded video file, outputting a side-by-side RGB/thermal annotated demo video |
 
@@ -48,6 +49,8 @@ CNN-LSTM: 3 TimeDistributed convolutional blocks (32 → 64 → 128 filters, eac
 | YOLO detection precision (FLIR) | 0.694 |
 | YOLO detection mAP@50 | 0.652 |
 
+> **Note on the 86.07% figure:** it was measured per sequence, before the group-aware split was added. Sequences overlap (stride 4, length 16), so they are not independent samples, and if the original split mixed UCF101 groups across train/test the number is optimistic. Run `python 02_split_ucf101.py --audit` on your data, re-split if needed, and report the per-video accuracy from `06_evaluate_test.py`.
+
 ## Key Findings
 
 - Visually distinct activities classified reliably; visually similar movements were the main source of confusion in the confusion matrix.
@@ -71,6 +74,8 @@ Datasets, trained model weights, and generated outputs are not included in this 
 pip install -r requirements.txt
 
 # Behavior classification pipeline
+python 02_split_ucf101.py --src path/to/UCF101 --classes JumpingJack PushUps TaiChi ...
+python 02_split_ucf101.py --audit   # optional: verify no group leakage
 python 03_make_thermal_frames.py
 python 04_build_sequences.py
 python 05_train_cnn_lstm.py

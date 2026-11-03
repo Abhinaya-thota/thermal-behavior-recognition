@@ -34,8 +34,11 @@ class NpySequence(tf.keras.utils.Sequence):
     def __getitem__(self, idx):
         batch_idx = self.indexes[idx * self.batch_size:(idx + 1) * self.batch_size]
         # Force a real in-RAM copy for the batch only (small)
-        Xb = np.array(self.X[batch_idx], dtype=np.float32)
-        yb = np.array(self.y[batch_idx], dtype=np.int32)
+        # mmap fancy-indexing needs sorted indices to stay fast
+        Xb = np.array(self.X[np.sort(batch_idx)], dtype=np.float32)
+        yb = np.array(self.y[np.sort(batch_idx)], dtype=np.int32)
+        if self.X.dtype == np.uint8:   # sequences stored as 0..255 -> scale to 0..1
+            Xb /= 255.0
         return Xb, yb
 
     def on_epoch_end(self):
