@@ -98,6 +98,12 @@ def process_video(video_path: str, out_dir: str) -> int:
 # MAIN
 # -----------------------------
 def main():
+    if not os.path.isdir(SRC_ROOT):
+        print(f"ERROR: source folder not found: {os.path.abspath(SRC_ROOT)}")
+        return
+
+    # Collect the work first so progress can show "n / total".
+    jobs = []
     for split in ["train", "val", "test"]:
         split_in = os.path.join(SRC_ROOT, split)
         if not os.path.isdir(split_in):
@@ -114,14 +120,31 @@ def main():
                 continue
 
             for vid in videos:
-                video_path = os.path.join(cls_in, vid)
-                video_id = os.path.splitext(vid)[0]
-                out_dir = os.path.join(OUT_ROOT, split, cls, video_id)
+                jobs.append((split, cls, vid))
 
-                n = process_video(video_path, out_dir)
-                #print(f"[{split}] {cls} / {vid} -> {n} frames")
+    print(f"Found {len(jobs)} videos under {os.path.abspath(SRC_ROOT)}")
+    if not jobs:
+        print("Nothing to do. Expected data/raw_videos/<train|val|test>/<Class>/<video>.avi")
+        return
+    print(f"Writing frames to {os.path.abspath(OUT_ROOT)}\n")
 
-    print("\nDONE. Thermal-like frames written to:", OUT_ROOT)
+    total_frames, empty = 0, []
+    for i, (split, cls, vid) in enumerate(jobs, 1):
+        video_path = os.path.join(SRC_ROOT, split, cls, vid)
+        video_id = os.path.splitext(vid)[0]
+        out_dir = os.path.join(OUT_ROOT, split, cls, video_id)
+
+        n = process_video(video_path, out_dir)
+        total_frames += n
+        if n == 0:
+            empty.append(video_path)
+        print(f"[{i:4d}/{len(jobs)}] {split:5s} {cls} / {vid} -> {n} frames", flush=True)
+
+    print(f"\nDONE. {total_frames} thermal-like frames from {len(jobs)} videos written to: {OUT_ROOT}")
+    if empty:
+        print(f"WARNING: {len(empty)} videos produced 0 frames (could not be read, or all frames too dark), e.g.:")
+        for p in empty[:10]:
+            print("   ", p)
 
 
 if __name__ == "__main__":
