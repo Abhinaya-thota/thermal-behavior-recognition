@@ -9,7 +9,8 @@ FRAME_ROOT = "data/frames_thermal"
 SEQ_ROOT = "data/sequences"
 
 SEQ_LEN = 16        # frames per clip (good for behavior learning)
-STRIDE = 4          # overlap between sequences
+STRIDE = 8          # step between sequence starts. 8 = 50% overlap between neighbours.
+                    # (4 = 75% overlap: 2x the data, mostly near-duplicates, 2x slower training)
 IMG_SIZE = (112, 112)
 
 # Sequences are stored as uint8 (0..255) instead of float32 (0..1):

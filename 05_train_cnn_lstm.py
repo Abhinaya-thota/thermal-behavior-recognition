@@ -15,12 +15,18 @@ MODEL_DIR = "models"
 OUT_DIR = "outputs"
 
 EPOCHS = 20
-BATCH_SIZE = 8          # start small on RAM
+BATCH_SIZE = 32         # bigger batches use the CPU/GPU more efficiently; lower to 16/8 if you run out of RAM
+LOADER_WORKERS = 4      # background threads that read the next batches from disk while the model trains
 LEARNING_RATE = 1e-3
 
 class NpySequence(tf.keras.utils.Sequence):
     """Memory-mapped batch loader for (X.npy, y.npy)."""
-    def __init__(self, x_path, y_path, batch_size, shuffle=True):
+    def __init__(self, x_path, y_path, batch_size, shuffle=True, workers=1):
+        try:
+            # Keras 3: lets fit() prefetch batches in background threads
+            super().__init__(workers=workers, use_multiprocessing=False, max_queue_size=workers * 2)
+        except TypeError:
+            super().__init__()   # older tf.keras Sequence takes no arguments
         self.X = np.load(x_path, mmap_mode="r")     # does NOT load into RAM
         self.y = np.load(y_path, mmap_mode="r")
         self.batch_size = batch_size
@@ -33,7 +39,6 @@ class NpySequence(tf.keras.utils.Sequence):
 
     def __getitem__(self, idx):
         batch_idx = self.indexes[idx * self.batch_size:(idx + 1) * self.batch_size]
-        # Force a real in-RAM copy for the batch only (small)
         # mmap fancy-indexing needs sorted indices to stay fast
         Xb = np.array(self.X[np.sort(batch_idx)], dtype=np.float32)
         yb = np.array(self.y[np.sort(batch_idx)], dtype=np.int32)
@@ -113,8 +118,8 @@ def main():
     seq_len, h, w, c = X_train_mm.shape[1:]
     print("Train samples:", X_train_mm.shape[0], "Input:", (seq_len, h, w, c), "Classes:", num_classes)
 
-    train_gen = NpySequence(x_train_path, y_train_path, batch_size=BATCH_SIZE, shuffle=True)
-    val_gen = NpySequence(x_val_path, y_val_path, batch_size=BATCH_SIZE, shuffle=False)
+    train_gen = NpySequence(x_train_path, y_train_path, batch_size=BATCH_SIZE, shuffle=True, workers=LOADER_WORKERS)
+    val_gen = NpySequence(x_val_path, y_val_path, batch_size=BATCH_SIZE, shuffle=False, workers=LOADER_WORKERS)
 
     model = build_model(seq_len, h, w, num_classes)
     model.summary()
