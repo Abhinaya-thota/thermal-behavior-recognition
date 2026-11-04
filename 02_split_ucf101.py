@@ -18,6 +18,7 @@ This script:
 
 Examples:
     python 02_split_ucf101.py --src path/to/UCF101 --classes JumpingJack PushUps TaiChi
+    python 02_split_ucf101.py --src data/raw_videos_old --mode copy   # re-split an existing split tree
     python 02_split_ucf101.py --audit
     python 02_split_ucf101.py --audit --root data/frames_thermal
 """
@@ -124,6 +125,8 @@ def split(args):
     if overlap:
         sys.exit(f"Groups {sorted(overlap)} are in both --test-groups and --val-groups.")
 
+    if os.path.abspath(args.src) == os.path.abspath(args.out):
+        sys.exit("--src and --out must be different folders (rename the old split first).")
     if not os.path.isdir(args.src):
         sys.exit(f"Source folder not found: {args.src}")
 
@@ -133,27 +136,39 @@ def split(args):
             sys.exit(f"{d} already has content. Move it away or pass --force "
                      f"(existing files are kept; new ones are added).")
 
-    classes = args.classes or sorted(
-        d for d in os.listdir(args.src) if os.path.isdir(os.path.join(args.src, d))
-    )
+    # Source can be a plain UCF101 tree (<src>/<Class>/*.avi) or an existing
+    # split tree (<src>/{train,val,test}/<Class>/*.avi) whose clips get pooled.
+    pooled = [os.path.join(args.src, s) for s in SPLITS if os.path.isdir(os.path.join(args.src, s))]
+    roots = pooled or [args.src]
+    if pooled:
+        print(f"Source is an existing split tree; pooling clips from: {', '.join(os.path.basename(r) for r in pooled)}\n")
+
+    clips = defaultdict(dict)   # cls -> {filename: path}
+    for r in roots:
+        for cls in os.listdir(r):
+            cls_dir = os.path.join(r, cls)
+            if not os.path.isdir(cls_dir):
+                continue
+            for vid in os.listdir(cls_dir):
+                if vid.lower().endswith(VIDEO_EXTS):
+                    clips[cls].setdefault(vid, os.path.join(cls_dir, vid))
+
+    classes = args.classes or sorted(clips)
 
     counts = {s: 0 for s in SPLITS}
     for cls in classes:
-        cls_dir = os.path.join(args.src, cls)
-        if not os.path.isdir(cls_dir):
-            print(f"WARNING: class folder not found, skipping: {cls_dir}")
+        if cls not in clips:
+            print(f"WARNING: class not found in source, skipping: {cls}")
             continue
 
         per_cls = {s: 0 for s in SPLITS}
-        for vid in sorted(os.listdir(cls_dir)):
-            if not vid.lower().endswith(VIDEO_EXTS):
-                continue
+        for vid, path in sorted(clips[cls].items()):
             g = parse_group(vid)
             if g is None:
                 print(f"WARNING: no group tag in {vid}, skipping")
                 continue
             s = "test" if g in test_groups else "val" if g in val_groups else "train"
-            place(os.path.join(cls_dir, vid), os.path.join(args.out, s, cls, vid), args.mode)
+            place(path, os.path.join(args.out, s, cls, vid), args.mode)
             per_cls[s] += 1
 
         for s in SPLITS:
@@ -168,7 +183,7 @@ def split(args):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--src", help="UCF101 root containing one folder per class")
+    p.add_argument("--src", help="UCF101 root (one folder per class) or an existing train/val/test tree to re-split")
     p.add_argument("--out", default="data/raw_videos", help="Output root for train/val/test")
     p.add_argument("--classes", nargs="*", help="Class folder names to include (default: all)")
     p.add_argument("--test-groups", default="1-7", help="Groups for test (default 1-7 = official split 1)")
