@@ -87,6 +87,10 @@ def audit(root):
     if unparsed:
         print(f"  WARNING: {unparsed} clip names had no _gXX_cYY group tag; they could not be checked.")
 
+    if total == 0:
+        print("  ERROR: no clips found -- check the folder path and layout (<root>/<split>/<Class>/<clip>).")
+        return 1
+
     if not leaks:
         print("  OK: no UCF101 group appears in more than one split.")
         return 0
@@ -174,6 +178,10 @@ def split(args):
         for s in SPLITS:
             counts[s] += per_cls[s]
         print(f"{cls:25s} train={per_cls['train']:4d} val={per_cls['val']:4d} test={per_cls['test']:4d}")
+
+    if sum(counts.values()) == 0:
+        sys.exit("\nERROR: no videos were placed. Expected <src>/<Class>/v_<Class>_gXX_cYY.avi "
+                 "or <src>/{train,val,test}/<Class>/v_<Class>_gXX_cYY.avi")
 
     print(f"\nTOTAL train={counts['train']} val={counts['val']} test={counts['test']}")
     print(f"Test groups: {sorted(test_groups)}  Val groups: {sorted(val_groups)}")
