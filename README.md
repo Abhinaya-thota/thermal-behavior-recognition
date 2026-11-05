@@ -33,6 +33,8 @@ The project has two parallel tracks: **behavior classification** (CNN-LSTM, trai
 
 ### Utility
 
+- `colab_train.ipynb` — runs training (`05`) and evaluation (`06`) on a free Google Colab GPU; on a CPU-only machine an epoch can take about an hour
+
 - `check_frames_structure.py` — sanity-checks that the extracted frame folders have the expected split/class/video structure before building sequences
 
 ## Model Architecture
