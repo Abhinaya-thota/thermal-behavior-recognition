@@ -16,7 +16,7 @@ OUT_DIR = "outputs"
 
 EPOCHS = 20
 # RAM use grows with batch size (~1.6 GB of activations per 16 sequences at 112x112).
-# 32 ran out of memory on a 16 GB laptop. If 16 also fails with RESOURCE_EXHAUSTED / OOM, use 8.
+# 32 ran out of memory on a CPU-only Windows machine. If 16 also fails with RESOURCE_EXHAUSTED / OOM, use 8.
 BATCH_SIZE = 16
 LOADER_WORKERS = 2      # background threads that read the next batches from disk while the model trains
 LEARNING_RATE = 1e-3
