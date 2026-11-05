@@ -15,8 +15,10 @@ MODEL_DIR = "models"
 OUT_DIR = "outputs"
 
 EPOCHS = 20
-BATCH_SIZE = 32         # bigger batches use the CPU/GPU more efficiently; lower to 16/8 if you run out of RAM
-LOADER_WORKERS = 4      # background threads that read the next batches from disk while the model trains
+# RAM use grows with batch size (~1.6 GB of activations per 16 sequences at 112x112).
+# 32 ran out of memory on a 16 GB laptop. If 16 also fails with RESOURCE_EXHAUSTED / OOM, use 8.
+BATCH_SIZE = 16
+LOADER_WORKERS = 2      # background threads that read the next batches from disk while the model trains
 LEARNING_RATE = 1e-3
 
 class NpySequence(tf.keras.utils.Sequence):
