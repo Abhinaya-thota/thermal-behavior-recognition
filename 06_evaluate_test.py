@@ -1,3 +1,4 @@
+import argparse
 import os
 import numpy as np
 import tensorflow as tf
@@ -14,6 +15,17 @@ MODEL_PATH = "models/thermal_cnn_lstm.h5"
 BATCH_SIZE = 4  # safe on RAM; if memory error set to 2
 
 def main():
+    parser = argparse.ArgumentParser(description="Evaluate a trained model on the test sequences")
+    parser.add_argument("--model", default=MODEL_PATH,
+                        help="Model file (default: models/thermal_cnn_lstm.h5; "
+                             "pretrained version: models/thermal_mobilenet_lstm.keras)")
+    args = parser.parse_args()
+    # Reports for the default model keep their old names; other models get a suffix.
+    tag = "" if os.path.normpath(args.model) == os.path.normpath(MODEL_PATH) else \
+        "_" + os.path.splitext(os.path.basename(args.model))[0]
+    report_path = os.path.join(OUT_DIR, f"test_report{tag}.txt")
+    cm_path = os.path.join(OUT_DIR, f"confusion_matrix_test{tag}.png")
+
     os.makedirs(OUT_DIR, exist_ok=True)
 
     test_dir = os.path.join(SEQ_ROOT, "test")
@@ -23,7 +35,8 @@ def main():
 
     print("Test samples:", len(y_test), "Classes:", len(labels))
 
-    model = tf.keras.models.load_model(MODEL_PATH)
+    print("Model:", args.model)
+    model = tf.keras.models.load_model(args.model)
 
     # Predict in batches (works for uint8 or float32 sequences, never loads the full test set)
     probs = []
@@ -63,7 +76,7 @@ def main():
     print("\n=== Classification Report (TEST) ===\n")
     print(report)
 
-    with open(os.path.join(OUT_DIR, "test_report.txt"), "w", encoding="utf-8") as f:
+    with open(report_path, "w", encoding="utf-8") as f:
         f.write(f"Test accuracy (per sequence): {test_acc:.6f}\n")
         f.write(video_line)
         f.write(f"Test loss: {test_loss:.6f}\n\n")
@@ -77,14 +90,21 @@ def main():
     plt.title("Confusion Matrix (Test)")
     plt.xlabel("Predicted")
     plt.ylabel("True")
+    plt.xticks(range(len(labels)), labels, rotation=45, ha="right")
+    plt.yticks(range(len(labels)), labels)
+    for r in range(cm.shape[0]):
+        for c in range(cm.shape[1]):
+            if cm[r, c]:
+                plt.text(c, r, str(cm[r, c]), ha="center", va="center", fontsize=7,
+                         color="black" if cm[r, c] > cm.max() * 0.6 else "white")
     plt.colorbar()
     plt.tight_layout()
-    plt.savefig(os.path.join(OUT_DIR, "confusion_matrix_test.png"))
+    plt.savefig(cm_path)
     plt.close()
 
-    print("\nSaved to outputs/:")
-    print(" - test_report.txt")
-    print(" - confusion_matrix_test.png")
+    print("\nSaved:")
+    print(" -", report_path)
+    print(" -", cm_path)
 
 if __name__ == "__main__":
     main()

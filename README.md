@@ -17,6 +17,7 @@ The project has two parallel tracks: **behavior classification** (CNN-LSTM, trai
 | `02_split_ucf101.py` | Builds `data/raw_videos/{train,val,test}` from UCF101 **by group** (`gXX`), so clips of the same actor/scene never land in both train and test. `--audit` checks an existing split for this leakage |
 | `03_make_thermal_frames.py` | Converts RGB video (UCF101) into thermal-like frames: grayscale → CLAHE contrast enhancement → Gaussian blur → normalization, with a quality filter to skip blank/corrupt frames |
 | `04_build_sequences.py` | Groups frames into 16-frame sequences per video, streaming them into a memory-mapped `uint8` `X.npy` (peak RAM ≈ one video; 4× smaller on disk than float32). Also saves `video_idx.npy` so evaluation can score per video |
+| `05b_train_pretrained.py` | Same input, but each frame goes through MobileNetV2 pretrained on ImageNet; clip-consistent augmentation (flip, crop, brightness/contrast, noise), class weights, and two-phase training (frozen backbone, then fine-tuning). Saves `models/thermal_mobilenet_lstm.keras` |
 | `05_train_cnn_lstm.py` | Trains the CNN-LSTM classifier (TimeDistributed CNN blocks + LSTM + dense head) using a memory-mapped data loader to handle large sequence arrays without loading everything into RAM |
 | `06_evaluate_test.py` | Evaluates the trained model on the held-out test set: per-sequence and per-video accuracy, classification report and confusion matrix |
 | `07_live_prediction.py` | Runs real-time behavior prediction from a webcam feed, with majority-vote smoothing to reduce flicker |
@@ -33,7 +34,7 @@ The project has two parallel tracks: **behavior classification** (CNN-LSTM, trai
 
 ### Utility
 
-- `colab_train.ipynb` — runs training (`05`) and evaluation (`06`) on a free Google Colab GPU; on a CPU-only machine an epoch can take about an hour
+- `colab_train.ipynb` — runs training (`05`, `05b`) and evaluation (`06`) on a free Google Colab GPU; on a CPU-only machine an epoch can take about an hour
 
 - `check_frames_structure.py` — sanity-checks that the extracted frame folders have the expected split/class/video structure before building sequences
 
@@ -45,13 +46,14 @@ CNN-LSTM: 3 TimeDistributed convolutional blocks (32 → 64 → 128 filters, eac
 
 | Metric | Value |
 |---|---|
-| Classification accuracy (12 activity classes) | **86.07%** |
-| Training sequences | 22,992 |
-| Test sequences | 3,797 |
+| Behavior classification, per-video test accuracy (12 classes, 461 test videos) | **27.1%** (chance: 8.3%) |
+| Behavior classification, per-sequence test accuracy | 24.4% |
+| Macro F1 | 0.226 |
+| Training / test sequences | 9,642 / 4,242 (16 frames, stride 8) |
 | YOLO detection precision (FLIR) | 0.694 |
 | YOLO detection mAP@50 | 0.652 |
 
-> **Note on the 86.07% figure:** it was measured per sequence, before the group-aware split was added. Sequences overlap (stride 4, length 16), so they are not independent samples, and if the original split mixed UCF101 groups across train/test the number is optimistic. Run `python 02_split_ucf101.py --audit` on your data, re-split if needed, and report the per-video accuracy from `06_evaluate_test.py`.
+**About the earlier 86.07% figure.** It was measured on a split made clip by clip. An audit (`02_split_ucf101.py --audit`) showed that ~80% of clips (1,294 of 1,623) shared a UCF101 group (same actor, same scene) with clips in another split, so the model was largely recognising scenes it had already seen. After re-splitting by group, the same CNN-LSTM reaches ~96% training accuracy but only 27% on unseen people and scenes: it overfits to backgrounds. `05b_train_pretrained.py` (MobileNetV2 pretrained on ImageNet + clip augmentation + fine-tuning) targets exactly this; its results will be added here.
 
 ## Key Findings
 
