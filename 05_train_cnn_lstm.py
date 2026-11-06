@@ -120,6 +120,18 @@ def main():
     seq_len, h, w, c = X_train_mm.shape[1:]
     print("Train samples:", X_train_mm.shape[0], "Input:", (seq_len, h, w, c), "Classes:", num_classes)
 
+    # Refuse to train on broken data (e.g. an X.npy that was only partly written or copied).
+    for name, path in [("train", x_train_path), ("val", x_val_path)]:
+        X_mm = np.load(path, mmap_mode="r")
+        idx = np.unique(np.linspace(0, len(X_mm) - 1, min(200, len(X_mm))).astype(int))
+        blank = float(np.mean([np.asarray(X_mm[i], dtype=np.float32).std() < 1e-3 * (255 if X_mm.dtype == np.uint8 else 1)
+                               for i in idx]))
+        print(f"Data check ({name}): {blank:.0%} of {len(idx)} sampled sequences are blank")
+        if blank > 0.05:
+            raise SystemExit(
+                f"STOP: {blank:.0%} of the sampled {name} sequences are blank, so {path} is broken "
+                f"(only partly written or copied). Rebuild it with 04_build_sequences.py and copy it again.")
+
     train_gen = NpySequence(x_train_path, y_train_path, batch_size=BATCH_SIZE, shuffle=True, workers=LOADER_WORKERS)
     val_gen = NpySequence(x_val_path, y_val_path, batch_size=BATCH_SIZE, shuffle=False, workers=LOADER_WORKERS)
 

@@ -52,12 +52,40 @@ def load_frames(folder):
 # -----------------------------
 # PROCESS SPLIT (train/val/test)
 # -----------------------------
+def _write_npy_header(f, shape):
+    np.lib.format.write_array_header_1_0(f, {
+        "descr": np.lib.format.dtype_to_descr(np.dtype(STORE_DTYPE)),
+        "fortran_order": False,
+        "shape": tuple(int(d) for d in shape),
+    })
+
+
+def verify_sequences(x_path, expected_len, sample=300):
+    """Re-open the saved X.npy and check it is the right size and not blank."""
+    X = np.load(x_path, mmap_mode="r")
+    if len(X) != expected_len:
+        raise RuntimeError(f"{x_path}: has {len(X)} sequences, expected {expected_len}")
+    idx = np.unique(np.concatenate([
+        np.linspace(0, len(X) - 1, min(sample, len(X))).astype(int),   # spread over the whole file
+        [len(X) - 1],                                                   # and the very end
+    ]))
+    stds = np.array([float(np.asarray(X[i], dtype=np.float32).std()) for i in idx])
+    blank = float(np.mean(stds < 1.0))
+    print(f"  check: {len(idx)} sequences sampled across the file, {blank:.0%} blank, "
+          f"last sequence std={stds[-1]:.1f}")
+    if blank > 0.05:
+        raise RuntimeError(
+            f"{x_path}: {blank:.0%} of sampled sequences are blank -- the file was not written correctly. "
+            f"Make sure the disk has free space and is a local drive, then run this script again.")
+
+
 def process_split(split):
     """
     Two passes so peak RAM is one video, not the whole split:
       1) count how many sequences each video yields (file listing only)
-      2) open X.npy as a memory-mapped file of exactly that size and
-         write each sequence straight to disk.
+      2) write each sequence straight to X.npy with ordinary sequential file
+         writes (no memory-mapping, which is unreliable on network drives),
+         then re-open the file and verify it.
     """
     print(f"\nProcessing {split}...")
 
@@ -85,52 +113,62 @@ def process_split(split):
 
     save_dir = os.path.join(SEQ_ROOT, split)
     os.makedirs(save_dir, exist_ok=True)
+    x_path = os.path.join(save_dir, "X.npy")
 
     h, w = IMG_SIZE[1], IMG_SIZE[0]
-    shape = (total, SEQ_LEN, h, w, 1)
-    gb = np.prod(shape) * np.dtype(STORE_DTYPE).itemsize / 1e9
-    print(f"  {len(plan)} videos -> {total} sequences, X.npy {shape} {np.dtype(STORE_DTYPE).name} ({gb:.2f} GB)")
+    seq_shape = (SEQ_LEN, h, w, 1)
+    seq_bytes = int(np.prod(seq_shape)) * np.dtype(STORE_DTYPE).itemsize
+    print(f"  {len(plan)} videos -> {total} sequences, X.npy {(total,) + seq_shape} "
+          f"{np.dtype(STORE_DTYPE).name} ({total * seq_bytes / 1e9:.2f} GB)")
 
-    # Pass 2: fill memory-mapped output
-    X = np.lib.format.open_memmap(os.path.join(save_dir, "X.npy"), mode="w+", dtype=STORE_DTYPE, shape=shape)
+    # Pass 2: stream sequences to disk
     y = np.empty(total, dtype=np.int32)
     video_idx = np.empty(total, dtype=np.int32)   # which video each sequence came from
 
     i = 0
-    for v, (video_path, label, n_planned) in enumerate(plan):
-        frames = load_frames(video_path)
-        # Frames can be dropped if unreadable; recompute and never exceed the plan.
-        n = min(num_sequences(len(frames)), n_planned)
-        for k in range(n):
-            start = k * STRIDE
-            X[i, :, :, :, 0] = frames[start:start + SEQ_LEN]
-            y[i] = label
-            video_idx[i] = v
-            i += 1
+    with open(x_path, "wb") as f:
+        _write_npy_header(f, (total,) + seq_shape)
+        for v, (video_path, label, n_planned) in enumerate(plan):
+            frames = load_frames(video_path)
+            # Frames can be dropped if unreadable; recompute and never exceed the plan.
+            n = min(num_sequences(len(frames)), n_planned)
+            for k in range(n):
+                start = k * STRIDE
+                f.write(np.ascontiguousarray(frames[start:start + SEQ_LEN], dtype=STORE_DTYPE).tobytes())
+                y[i] = label
+                video_idx[i] = v
+                i += 1
+            if (v + 1) % 100 == 0 or v + 1 == len(plan):
+                print(f"  [{v + 1}/{len(plan)} videos] {i} sequences written", flush=True)
+        f.flush()
+        os.fsync(f.fileno())
 
     if i < total:
-        # Some frames were unreadable: shrink to what was actually written.
+        # Some frames were unreadable: rewrite with the correct sequence count in the header.
         print(f"  NOTE: {total - i} planned sequences were dropped (unreadable frames). Rewriting at final size.")
-        X.flush()
-        del X
-        src = np.load(os.path.join(save_dir, "X.npy"), mmap_mode="r")
         tmp_path = os.path.join(save_dir, "X.tmp.npy")
-        dst = np.lib.format.open_memmap(tmp_path, mode="w+", dtype=STORE_DTYPE, shape=(i,) + shape[1:])
-        for a in range(0, i, 256):
-            dst[a:a + 256] = src[a:min(a + 256, i)]
-        dst.flush()
-        del dst, src
-        os.replace(tmp_path, os.path.join(save_dir, "X.npy"))
-    else:
-        X.flush()
-        del X
+        with open(x_path, "rb") as src, open(tmp_path, "wb") as f:
+            np.lib.format.read_magic(src)
+            np.lib.format.read_array_header_1_0(src)      # skip the old header (it has the planned count)
+            _write_npy_header(f, (i,) + seq_shape)
+            remaining = i * seq_bytes
+            while remaining:
+                chunk = src.read(min(remaining, 64 * seq_bytes))
+                if not chunk:
+                    raise RuntimeError(f"{x_path} ended early while rewriting")
+                f.write(chunk)
+                remaining -= len(chunk)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, x_path)
 
     np.save(os.path.join(save_dir, "y.npy"), y[:i])
     np.save(os.path.join(save_dir, "video_idx.npy"), video_idx[:i])
     np.save(os.path.join(save_dir, "videos.npy"), np.array([p for p, _, _ in plan]))
     np.save(os.path.join(save_dir, "labels.npy"), np.array(classes))
 
-    print(f"{split} saved: {(i,) + shape[1:]}")
+    verify_sequences(x_path, i)
+    print(f"{split} saved: {(i,) + seq_shape}")
 
 
 # -----------------------------
